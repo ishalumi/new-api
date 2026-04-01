@@ -27,7 +27,7 @@ jobs:
           VITE_REACT_APP_VERSION: ${{ github.sha }}
         run: |
           cd web
-          bun install --frozen-lockfile
+          bun install
           DISABLE_ESLINT_PLUGIN='true' bun run build
 
       - name: Setup Go
