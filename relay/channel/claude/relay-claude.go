@@ -373,9 +373,9 @@ func RequestOpenAI2ClaudeMessage(c *gin.Context, textRequest dto.GeneralOpenAIRe
 				if message.ToolCalls != nil {
 					for _, toolCall := range message.ParseToolCalls() {
 						inputObj := make(map[string]any)
-						if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &inputObj); err != nil {
+						if err := common.UnmarshalJsonStr(toolCall.Function.Arguments, &inputObj); err != nil {
 							common.SysLog("tool call function arguments is not a map[string]any: " + fmt.Sprintf("%v", toolCall.Function.Arguments))
-							continue
+							inputObj = map[string]any{}
 						}
 						claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
 							Type:  "tool_use",
@@ -448,11 +448,17 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 			choice.Delta.Content = claudeResponse.Delta.Text
 			switch claudeResponse.Delta.Type {
 			case "input_json_delta":
+				arguments := "{}"
+				if claudeResponse.Delta.PartialJson != nil {
+					if partial := strings.TrimSpace(*claudeResponse.Delta.PartialJson); partial != "" {
+						arguments = partial
+					}
+				}
 				tools = append(tools, dto.ToolCallResponse{
 					Type:  "function",
 					Index: common.GetPointer(fcIdx),
 					Function: dto.FunctionResponse{
-						Arguments: *claudeResponse.Delta.PartialJson,
+						Arguments: arguments,
 					},
 				})
 			case "signature_delta":

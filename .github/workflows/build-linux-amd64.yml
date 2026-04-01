@@ -1,0 +1,52 @@
+name: Build Linux amd64 binary
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "codex/**"
+
+permissions:
+  contents: read
+
+jobs:
+  build-linux-amd64:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build frontend
+        env:
+          CI: ""
+          VITE_REACT_APP_VERSION: ${{ github.sha }}
+        run: |
+          cd web
+          bun install --frozen-lockfile
+          DISABLE_ESLINT_PLUGIN='true' bun run build
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.6'
+
+      - name: Build backend
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p dist
+          go build -ldflags "-s -w -X github.com/QuantumNous/new-api/common.Version=${GITHUB_SHA}" -o dist/new-api-linux-amd64 .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: new-api-linux-amd64
+          path: dist/new-api-linux-amd64
+          if-no-files-found: error
