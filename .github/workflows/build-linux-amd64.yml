@@ -1,0 +1,119 @@
+name: Build & Push Docker Image (multi-arch)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-single-arch:
+    name: Build & push (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            platform: linux/amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            platform: linux/arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+      GHCR_REPOSITORY: ${{ github.repository }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Normalize GHCR repository
+        run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Write VERSION
+        run: |
+          if [ ! -s VERSION ]; then
+            echo "isha-$(git rev-parse --short HEAD)" > VERSION
+          fi
+          echo "Building $(cat VERSION) for ${{ matrix.arch }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker meta
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ env.GHCR_REPOSITORY }}
+
+      - name: Build and push single-arch
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: ${{ matrix.platform }}
+          push: true
+          tags: |
+            ghcr.io/${{ env.GHCR_REPOSITORY }}:latest-${{ matrix.arch }}
+            ghcr.io/${{ env.GHCR_REPOSITORY }}:sha-${{ github.sha }}-${{ matrix.arch }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=new-api-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=new-api-${{ matrix.arch }}
+          provenance: false
+          sbom: false
+
+      - name: Summary
+        run: |
+          echo "### ${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "ghcr.io/${GHCR_REPOSITORY}:latest-${{ matrix.arch }}" >> $GITHUB_STEP_SUMMARY
+          echo "${{ steps.build.outputs.digest }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+  create-manifest:
+    name: Create multi-arch manifests
+    needs: [build-single-arch]
+    runs-on: ubuntu-latest
+    env:
+      FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+    steps:
+      - name: Normalize GHCR repository
+        run: echo "GHCR_REPOSITORY=${GITHUB_REPOSITORY,,}" >> $GITHUB_ENV
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create & push manifests
+        run: |
+          set -e
+          docker buildx imagetools create \
+            -t "ghcr.io/${GHCR_REPOSITORY}:latest" \
+            "ghcr.io/${GHCR_REPOSITORY}:latest-amd64" \
+            "ghcr.io/${GHCR_REPOSITORY}:latest-arm64"
+
+          docker buildx imagetools create \
+            -t "ghcr.io/${GHCR_REPOSITORY}:sha-${GITHUB_SHA}" \
+            "ghcr.io/${GHCR_REPOSITORY}:sha-${GITHUB_SHA}-amd64" \
+            "ghcr.io/${GHCR_REPOSITORY}:sha-${GITHUB_SHA}-arm64"
+
+      - name: Manifest summary
+        run: |
+          echo "### Multi-arch Manifest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          docker buildx imagetools inspect "ghcr.io/${GHCR_REPOSITORY}:latest" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
