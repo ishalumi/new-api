@@ -76,6 +76,11 @@ type ClaudeConvertInfo struct {
 	// these upstream-offset fields.
 	ToolCallBaseIndex      int
 	ToolCallMaxIndexOffset int
+
+	// HasContentBlock tracks whether any non-thinking content block (text or
+	// tool_use) has been emitted in the stream. Used to detect thinking-only
+	// streams that need an empty text block fallback before message_stop.
+	HasContentBlock bool
 }
 
 // ClaudeToolCallBuffer is the protocol-level accumulator for one streamed

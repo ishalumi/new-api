@@ -433,6 +433,41 @@ func abortClaudeConversion(state *convmeta.ClaudeConvertInfo, message string) []
 	return append(responses, claudeConversionError(message))
 }
 
+// appendEmptyTextFallback adds an empty text content block when the stream
+// has not emitted any non-thinking content block (text or tool_use). This
+// handles the case where a reasoning model (e.g. DeepSeek V4-Flash with max
+// reasoning_effort) consumes the entire max_tokens budget on reasoning,
+// leaving content empty. Anthropic's streaming protocol requires at least one
+// non-thinking content block; without it, Claude Code reports an empty or
+// malformed response.
+//
+// Must be called AFTER stopOpenBlocks has closed any open block.
+func appendEmptyTextFallback(state *convmeta.ClaudeConvertInfo, responses []*dto.ClaudeResponse) []*dto.ClaudeResponse {
+	if state == nil || state.HasContentBlock {
+		return responses
+	}
+	// stopOpenBlocks has already advanced the index for thinking blocks, so
+	// state.Index points to the next free slot. For the empty-stream case
+	// (LastMessagesType == None), state.Index is 0.
+	textIndex := state.Index
+	if state.LastMessagesType != convmeta.LastMessageTypeNone {
+		textIndex = state.Index + 1
+	}
+	responses = append(responses,
+		&dto.ClaudeResponse{
+			Index: kitutil.GetPointer[int](textIndex),
+			Type:  "content_block_start",
+			ContentBlock: &dto.ClaudeMediaMessage{
+				Type: "text",
+				Text: kitutil.GetPointer[string](""),
+			},
+		},
+		generateStopBlock(textIndex),
+	)
+	state.HasContentBlock = true
+	return responses
+}
+
 func buildClaudeUsageFromOpenAIUsage(oaiUsage *dto.Usage) *dto.ClaudeUsage {
 	if oaiUsage == nil {
 		return nil
@@ -538,6 +573,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 		if err := closeBlocks(); err != nil {
 			return fail(err)
 		}
+		claudeResponses = appendEmptyTextFallback(state, claudeResponses)
 		stopReason := stopReasonOpenAI2Claude(state.FinishReason)
 		if stopReason == "" {
 			stopReason = "end_turn"
@@ -594,6 +630,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 				return fail(err)
 			}
 			state.LastMessagesType = convmeta.LastMessageTypeTools
+			state.HasContentBlock = true
 		}
 		if err := bufferToolCallDeltas(state, chosenChoice.Delta.ToolCalls); err != nil {
 			return fail(err)
@@ -619,6 +656,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 				},
 			})
 			state.LastMessagesType = convmeta.LastMessageTypeText
+			state.HasContentBlock = true
 		}
 		blockIndex := state.Index
 		claudeResponses = append(claudeResponses, &dto.ClaudeResponse{
@@ -651,6 +689,7 @@ func StreamResponseOpenAI2Claude(openAIResponse *dto.ChatCompletionsStreamRespon
 	if err := closeBlocks(); err != nil {
 		return fail(err)
 	}
+	claudeResponses = appendEmptyTextFallback(state, claudeResponses)
 	stopReason := stopReasonOpenAI2Claude(state.FinishReason)
 	claudeResponses = append(claudeResponses,
 		&dto.ClaudeResponse{
@@ -677,6 +716,7 @@ func FinalizeStreamResponseOpenAI2Claude(info convmeta.Meta) []*dto.ClaudeRespon
 	if err != nil {
 		return abortClaudeConversion(state, err.Error())
 	}
+	responses = appendEmptyTextFallback(state, responses)
 	stopReason := stopReasonOpenAI2Claude(state.FinishReason)
 	if stopReason == "" {
 		stopReason = "end_turn"
