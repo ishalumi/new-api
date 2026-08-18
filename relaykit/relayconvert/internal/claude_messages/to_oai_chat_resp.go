@@ -67,13 +67,15 @@ func StreamResponseClaude2OpenAI(claudeResponse *dto.ClaudeResponse) *dto.ChatCo
 			choice.Delta.Content = claudeResponse.Delta.Text
 			switch claudeResponse.Delta.Type {
 			case "input_json_delta":
-				tools = append(tools, dto.ToolCallResponse{
-					Type:  "function",
-					Index: kitutil.GetPointer(fcIdx),
-					Function: dto.FunctionResponse{
-						Arguments: *claudeResponse.Delta.PartialJson,
-					},
-				})
+				if claudeResponse.Delta.PartialJson != nil && *claudeResponse.Delta.PartialJson != "" {
+					tools = append(tools, dto.ToolCallResponse{
+						Type:  "function",
+						Index: kitutil.GetPointer(fcIdx),
+						Function: dto.FunctionResponse{
+							Arguments: *claudeResponse.Delta.PartialJson,
+						},
+					})
+				}
 			case "signature_delta":
 				signatureContent := "\n"
 				choice.Delta.ReasoningContent = &signatureContent
