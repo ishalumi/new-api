@@ -175,12 +175,14 @@ func chatToolCallToResponsesOutput(toolCall dto.ToolCallRequest, responseID stri
 		callID = fmt.Sprintf("%s_call_%d", responseID, index)
 	}
 	if toolCall.Type == "" || toolCall.Type == "function" {
+		ns, name := splitNamespaceName(toolCall.Function.Name)
 		return dto.ResponsesOutput{
 			Type:      responsesOutputTypeFunctionCall,
 			ID:        callID,
 			Status:    status,
 			CallId:    callID,
-			Name:      toolCall.Function.Name,
+			Name:      name,
+			Namespace: ns,
 			Arguments: chatArgumentsRawMessage(toolCall.Function.Arguments),
 		}, nil
 	}
@@ -229,4 +231,14 @@ func responsesStreamEvent(eventType string, payload dto.ResponsesStreamResponse)
 
 func intPtr(v int) *int {
 	return &v
+}
+
+// splitNamespaceName splits a flattened "ns__name" tool name back into
+// (namespace, name).  Returns ("", fullName) when no "__" separator is
+// present or the prefix is empty.
+func splitNamespaceName(fullName string) (namespace, name string) {
+	if idx := strings.LastIndex(fullName, "__"); idx > 0 {
+		return fullName[:idx], fullName[idx+2:]
+	}
+	return "", fullName
 }

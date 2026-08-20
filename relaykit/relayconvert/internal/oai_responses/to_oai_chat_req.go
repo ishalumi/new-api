@@ -289,6 +289,10 @@ func responsesFunctionCallItemToChatToolCall(item map[string]any) (dto.ToolCallR
 	if name == "" {
 		return dto.ToolCallRequest{}, errors.New("function_call item is missing name")
 	}
+	// Reconstruct flattened name when namespace is present (roundtrip).
+	if ns := strings.TrimSpace(kitutil.Interface2String(item["namespace"])); ns != "" {
+		name = ns + "__" + name
+	}
 	return dto.ToolCallRequest{
 		ID:   responsesCallID(item),
 		Type: "function",
@@ -435,7 +439,16 @@ func RequestTextToChatResponseFormat(raw json.RawMessage) (*dto.ResponseFormat, 
 
 func responsesImagePartToChatImageURL(part map[string]any) any {
 	if imageURL, ok := part["image_url"]; ok {
-		return imageURL
+		if m, isMap := imageURL.(map[string]any); isMap {
+			return m
+		}
+		// image_url is a string (e.g. data URI) — wrap into the
+		// {"url": ..., "detail": ...} object that Chat Completions expects.
+		wrapped := map[string]any{"url": imageURL}
+		if detail, ok := part["detail"]; ok {
+			wrapped["detail"] = detail
+		}
+		return wrapped
 	}
 	imageURL := map[string]any{}
 	for _, key := range []string{"url", "file_id", "detail"} {
