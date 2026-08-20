@@ -404,7 +404,12 @@ func closeActiveClaudeBlocks(state *convmeta.ClaudeConvertInfo) ([]*dto.ClaudeRe
 		state.LastMessagesType = convmeta.LastMessageTypeNone
 		return responses, nil
 	case convmeta.LastMessageTypeTools:
-		return flushPendingToolCalls(state)
+		responses, err := flushPendingToolCalls(state)
+		// flush 后清掉 LastMessagesType，避免后续 closeBlocks 重复
+		// 进入 Tools 分支（空 map 返回 nil 不会重复发块，但状态残留
+		// 会导致后续 text/thinking 块少一次 closeBlocks stop）
+		state.LastMessagesType = convmeta.LastMessageTypeNone
+		return responses, err
 	default:
 		return nil, nil
 	}

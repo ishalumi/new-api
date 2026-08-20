@@ -31,10 +31,10 @@ func OaiBufferedStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 	defer service.CloseResponseBodyGracefully(resp)
 
 	var (
-		accumulatedContent   = make(map[int]string) // per choice index
-		accumulatedReasoning = make(map[int]string) // per choice index
+		accumulatedContent   = make(map[int]string)                        // per choice index
+		accumulatedReasoning = make(map[int]string)                        // per choice index
 		accumulatedToolCalls = make(map[int]map[int]*dto.ToolCallResponse) // choiceIdx -> tcIdx -> tc
-		finishReason         = make(map[int]string) // per choice index
+		finishReason         = make(map[int]string)                        // per choice index
 		model                = info.UpstreamModelName
 		responseId           = helper.GetResponseID(c)
 		created              = time.Now().Unix()
@@ -94,10 +94,30 @@ func OaiBufferedStreamHandler(c *gin.Context, info *relaycommon.RelayInfo, resp 
 					if accumulatedToolCalls[idx] == nil {
 						accumulatedToolCalls[idx] = make(map[int]*dto.ToolCallResponse)
 					}
-					for _, tc := range choice.Delta.ToolCalls {
+					for tcPos, tc := range choice.Delta.ToolCalls {
 						tcIdx := 0
 						if tc.Index != nil {
 							tcIdx = *tc.Index
+						} else {
+							// 上游不带 index 时，按 chunk 内位置分配稳定 key。
+							// 但跨 chunk 的无 index fragment 需要靠 ID 或
+							// position 来关联，不能全部塌缩到 0。
+							if existing, ok := accumulatedToolCalls[idx][tcIdx]; ok && tc.ID != "" && existing.ID != "" && existing.ID != tc.ID {
+								// 同一个 tcIdx=0 但不同 ID → 新 tool call
+								tcIdx = len(accumulatedToolCalls[idx])
+							} else if tc.ID != "" {
+								// 尝试用 ID 查已有条目
+								for k, v := range accumulatedToolCalls[idx] {
+									if v.ID == tc.ID {
+										tcIdx = k
+										break
+									}
+								}
+								if tcIdx == 0 && accumulatedToolCalls[idx][0] != nil && accumulatedToolCalls[idx][0].ID != "" && accumulatedToolCalls[idx][0].ID != tc.ID {
+									tcIdx = len(accumulatedToolCalls[idx])
+								}
+							}
+							_ = tcPos
 						}
 						if existing, ok := accumulatedToolCalls[idx][tcIdx]; !ok {
 							tcCopy := tc
