@@ -388,6 +388,23 @@ func responsesRequestToolChoiceToChat(raw json.RawMessage) (any, error) {
 	if kitutil.Interface2String(choice["type"]) == "function" {
 		name := strings.TrimSpace(kitutil.Interface2String(choice["name"]))
 		if name != "" {
+			if namespace := strings.TrimSpace(kitutil.Interface2String(choice["server_label"])); namespace != "" {
+				name = namespace + "__" + name
+			} else if namespace = strings.TrimSpace(kitutil.Interface2String(choice["namespace"])); namespace != "" {
+				name = namespace + "__" + name
+			}
+			return map[string]any{
+				"type": "function",
+				"function": map[string]any{
+					"name": name,
+				},
+			}, nil
+		}
+	}
+	choiceType := strings.TrimSpace(kitutil.Interface2String(choice["type"]))
+	if choiceType == "mcp" || choiceType == "mcp_server" || choiceType == "namespace" {
+		name := strings.TrimSpace(kitutil.Interface2String(choice["name"]))
+		if name != "" {
 			return map[string]any{
 				"type": "function",
 				"function": map[string]any{
