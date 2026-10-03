@@ -169,21 +169,31 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 	}
 
 	if textRequest.ReasoningEffort != "" {
-		switch textRequest.ReasoningEffort {
-		case "low":
-			claudeRequest.Thinking = &dto.Thinking{
-				Type:         "enabled",
-				BudgetTokens: kitutil.GetPointer[int](1280),
-			}
-		case "medium":
-			claudeRequest.Thinking = &dto.Thinking{
-				Type:         "enabled",
-				BudgetTokens: kitutil.GetPointer[int](2048),
-			}
-		case "high":
-			claudeRequest.Thinking = &dto.Thinking{
-				Type:         "enabled",
-				BudgetTokens: kitutil.GetPointer[int](4096),
+		resolvedModel := convmeta.UpstreamModelName(info)
+		if resolvedModel == "" {
+			resolvedModel = claudeRequest.Model
+		}
+		validEffort := textRequest.ReasoningEffort == "low" || textRequest.ReasoningEffort == "medium" || textRequest.ReasoningEffort == "high"
+		if strings.HasPrefix(resolvedModel, "claude-opus-5-5") && validEffort {
+			claudeRequest.Thinking = &dto.Thinking{Type: "adaptive", Display: "summarized"}
+			claudeRequest.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, textRequest.ReasoningEffort))
+		} else {
+			switch textRequest.ReasoningEffort {
+			case "low":
+				claudeRequest.Thinking = &dto.Thinking{
+					Type:         "enabled",
+					BudgetTokens: kitutil.GetPointer[int](1280),
+				}
+			case "medium":
+				claudeRequest.Thinking = &dto.Thinking{
+					Type:         "enabled",
+					BudgetTokens: kitutil.GetPointer[int](2048),
+				}
+			case "high":
+				claudeRequest.Thinking = &dto.Thinking{
+					Type:         "enabled",
+					BudgetTokens: kitutil.GetPointer[int](4096),
+				}
 			}
 		}
 	}
@@ -225,8 +235,10 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 			textRequest.Messages[i].Role = "user"
 		}
 		fmtMessage := dto.Message{
-			Role:    message.Role,
-			Content: message.Content,
+			Role:               message.Role,
+			Content:            message.Content,
+			ReasoningContent:   message.ReasoningContent,
+			ReasoningSignature: message.ReasoningSignature,
 		}
 		if message.Role == "tool" {
 			fmtMessage.ToolCallId = message.ToolCallId
@@ -320,7 +332,9 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 					Content:   message.Content,
 				},
 			}
-		} else if message.IsStringContent() && message.ToolCalls == nil {
+		} else if message.IsStringContent() && message.ToolCalls == nil &&
+			(message.ReasoningContent == nil || *message.ReasoningContent == "") &&
+			(message.ReasoningSignature == nil || *message.ReasoningSignature == "") {
 			text := message.StringContent()
 			if text == "" {
 				text = "..."
@@ -328,6 +342,14 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 			claudeMessage.Content = text
 		} else {
 			claudeMediaMessages := make([]dto.ClaudeMediaMessage, 0)
+			if message.Role == "assistant" && message.ReasoningContent != nil && *message.ReasoningContent != "" &&
+				message.ReasoningSignature != nil && *message.ReasoningSignature != "" {
+				claudeMediaMessages = append(claudeMediaMessages, dto.ClaudeMediaMessage{
+					Type:      "thinking",
+					Thinking:  message.ReasoningContent,
+					Signature: *message.ReasoningSignature,
+				})
+			}
 			for _, mediaMessage := range message.ParseContent() {
 				switch mediaMessage.Type {
 				case "text":
@@ -363,7 +385,6 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 					continue
 				}
 			}
-
 			if message.ToolCalls != nil {
 				for _, toolCall := range message.ParseToolCalls() {
 					inputObj := make(map[string]any)

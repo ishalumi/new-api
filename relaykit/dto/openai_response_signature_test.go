@@ -3,6 +3,9 @@ package dto
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestToolCallResponsePreservesSignature(t *testing.T) {
@@ -25,4 +28,22 @@ func TestToolCallResponsePreservesSignature(t *testing.T) {
 	if got["signature"] != "opaque-thought-signature" {
 		t.Fatalf("serialized signature = %#v", got["signature"])
 	}
+}
+
+func TestReasoningSignatureUsesExplicitMessageAndStreamFields(t *testing.T) {
+	const signature = "opaque-reasoning-signature"
+	requestPayload := `{"role":"assistant","content":"answer","reasoning_signature":"` + signature + `"}`
+	var requestMessage Message
+	require.NoError(t, json.Unmarshal([]byte(requestPayload), &requestMessage))
+	require.NotNil(t, requestMessage.ReasoningSignature)
+	assert.Equal(t, signature, *requestMessage.ReasoningSignature)
+
+	responsePayload, err := json.Marshal(OpenAITextResponseChoice{Message: requestMessage})
+	require.NoError(t, err)
+	assert.Contains(t, string(responsePayload), `"reasoning_signature":"`+signature+`"`)
+
+	signatureValue := signature
+	streamPayload, err := json.Marshal(ChatCompletionsStreamResponseChoiceDelta{ReasoningSignature: &signatureValue})
+	require.NoError(t, err)
+	assert.JSONEq(t, `{"reasoning_signature":"`+signature+`"}`, string(streamPayload))
 }

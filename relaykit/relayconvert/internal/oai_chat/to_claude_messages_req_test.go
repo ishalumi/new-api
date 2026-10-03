@@ -2,9 +2,11 @@ package oaichat
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 
 	"github.com/QuantumNous/new-api/relaykit/dto"
+	"github.com/QuantumNous/new-api/relaykit/relayconvert/convmeta"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,4 +80,91 @@ func TestOpenAIChatRequestToClaudeMessagesNormalizesToolInputSchema(t *testing.T
 			assert.Equal(t, tt.wantSchema, tool.InputSchema)
 		})
 	}
+}
+
+func TestOpenAIChatRequestToClaudeMessagesUsesAdaptiveThinkingForResolvedOpus55(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high"} {
+		t.Run(effort, func(t *testing.T) {
+			maxTokens := uint(8192)
+			got, err := OpenAIChatRequestToClaudeMessages(context.Background(), &convmeta.Values{
+				ChannelMetaAttached: true,
+				UpstreamModelName:   "claude-opus-5-5-20261001",
+			}, dto.GeneralOpenAIRequest{
+				Model:           "configured-opus-alias",
+				MaxTokens:       &maxTokens,
+				ReasoningEffort: effort,
+				Messages:        []dto.Message{{Role: "user", Content: "Hello"}},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, &dto.Thinking{Type: "adaptive", Display: "summarized"}, got.Thinking)
+			assert.JSONEq(t, `{"effort":"`+effort+`"}`, string(got.OutputConfig))
+		})
+	}
+}
+
+func TestOpenAIChatRequestToClaudeMessagesKeepsBudgetThinkingForOtherModels(t *testing.T) {
+	maxTokens := uint(8192)
+	got, err := OpenAIChatRequestToClaudeMessages(context.Background(), &convmeta.Values{
+		ChannelMetaAttached: true,
+		UpstreamModelName:   "claude-sonnet-4-5",
+	}, dto.GeneralOpenAIRequest{
+		Model:           "configured-sonnet-alias",
+		MaxTokens:       &maxTokens,
+		ReasoningEffort: "medium",
+		Messages:        []dto.Message{{Role: "user", Content: "Hello"}},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "enabled", got.Thinking.Type)
+	assert.Equal(t, 2048, got.Thinking.GetBudgetTokens())
+	assert.Empty(t, got.OutputConfig)
+}
+
+func TestOpenAIChatRequestToClaudeMessagesReplaysReasoningSignature(t *testing.T) {
+	maxTokens := uint(1024)
+	reasoningContent := "I should use the tool."
+	reasoningSignature := "opaque-claude-signature"
+	toolCalls := json.RawMessage(`[{"id":"call_1","type":"function","function":{"name":"lookup","arguments":"{}"}}]`)
+
+	got, err := OpenAIChatRequestToClaudeMessages(context.Background(), nil, dto.GeneralOpenAIRequest{
+		Model:     "claude-test",
+		MaxTokens: &maxTokens,
+		Messages: []dto.Message{
+			{Role: "user", Content: "Look this up"},
+			{
+				Role:               "assistant",
+				Content:            "I will check.",
+				ReasoningContent:   &reasoningContent,
+				ReasoningSignature: &reasoningSignature,
+				ToolCalls:          toolCalls,
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.Len(t, got.Messages, 2)
+	blocks, ok := got.Messages[1].Content.([]dto.ClaudeMediaMessage)
+	require.True(t, ok)
+	require.Len(t, blocks, 3)
+	assert.Equal(t, dto.ClaudeMediaMessage{Type: "thinking", Thinking: &reasoningContent, Signature: reasoningSignature}, blocks[0])
+	assert.Equal(t, "text", blocks[1].Type)
+	assert.Equal(t, "tool_use", blocks[2].Type)
+}
+
+func TestOpenAIChatRequestToClaudeMessagesIgnoresIncompleteReasoningReplay(t *testing.T) {
+	maxTokens := uint(1024)
+	empty := ""
+
+	got, err := OpenAIChatRequestToClaudeMessages(context.Background(), nil, dto.GeneralOpenAIRequest{
+		Model:     "claude-test",
+		MaxTokens: &maxTokens,
+		Messages: []dto.Message{
+			{Role: "user", Content: "Hello"},
+			{Role: "assistant", Content: "Hi", ReasoningContent: &empty, ReasoningSignature: &empty},
+		},
+	})
+
+	require.NoError(t, err)
+	assert.Equal(t, "Hi", got.Messages[1].Content)
 }
