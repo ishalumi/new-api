@@ -83,9 +83,11 @@ func TestOpenAIChatRequestToClaudeMessagesNormalizesToolInputSchema(t *testing.T
 }
 
 func TestOpenAIChatRequestToClaudeMessagesUsesAdaptiveThinkingForResolvedOpus55(t *testing.T) {
-	for _, effort := range []string{"low", "medium", "high"} {
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
 		t.Run(effort, func(t *testing.T) {
 			maxTokens := uint(8192)
+			temperature := 0.7
+			topP := 0.9
 			got, err := OpenAIChatRequestToClaudeMessages(context.Background(), &convmeta.Values{
 				ChannelMetaAttached: true,
 				UpstreamModelName:   "claude-opus-5-5-20261001",
@@ -93,12 +95,39 @@ func TestOpenAIChatRequestToClaudeMessagesUsesAdaptiveThinkingForResolvedOpus55(
 				Model:           "configured-opus-alias",
 				MaxTokens:       &maxTokens,
 				ReasoningEffort: effort,
+				Temperature:     &temperature,
+				TopP:            &topP,
 				Messages:        []dto.Message{{Role: "user", Content: "Hello"}},
 			})
 
 			require.NoError(t, err)
 			assert.Equal(t, &dto.Thinking{Type: "adaptive", Display: "summarized"}, got.Thinking)
 			assert.JSONEq(t, `{"effort":"`+effort+`"}`, string(got.OutputConfig))
+			// Opus 5.5 adaptive thinking rejects non-default sampling params with 400.
+			assert.Nil(t, got.Temperature)
+			assert.Nil(t, got.TopP)
+			assert.Nil(t, got.TopK)
+		})
+	}
+}
+
+func TestOpenAIChatRequestToClaudeMessagesUsesAdaptiveThinkingForOpus55EffortSuffix(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high", "xhigh", "max"} {
+		t.Run(effort, func(t *testing.T) {
+			maxTokens := uint(8192)
+			got, err := OpenAIChatRequestToClaudeMessages(context.Background(), nil, dto.GeneralOpenAIRequest{
+				Model:     "claude-opus-5-5-" + effort,
+				MaxTokens: &maxTokens,
+				Messages:  []dto.Message{{Role: "user", Content: "Hello"}},
+			})
+
+			require.NoError(t, err)
+			assert.Equal(t, "claude-opus-5-5", got.Model)
+			assert.Equal(t, &dto.Thinking{Type: "adaptive", Display: "summarized"}, got.Thinking)
+			assert.JSONEq(t, `{"effort":"`+effort+`"}`, string(got.OutputConfig))
+			assert.Nil(t, got.Temperature)
+			assert.Nil(t, got.TopP)
+			assert.Nil(t, got.TopK)
 		})
 	}
 }

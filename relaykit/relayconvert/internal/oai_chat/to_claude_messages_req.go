@@ -124,14 +124,16 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 	if baseModel, effortLevel, ok := reasoning.TrimEffortSuffix(textRequest.Model); ok && effortLevel != "" &&
 		(strings.HasPrefix(textRequest.Model, "claude-opus-4-6") ||
 			strings.HasPrefix(textRequest.Model, "claude-opus-4-7") ||
-			strings.HasPrefix(textRequest.Model, "claude-opus-4-8")) {
+			strings.HasPrefix(textRequest.Model, "claude-opus-4-8") ||
+			strings.HasPrefix(textRequest.Model, "claude-opus-5-5")) {
 		claudeRequest.Model = baseModel
 		claudeRequest.Thinking = &dto.Thinking{
 			Type: "adaptive",
 		}
 		claudeRequest.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, effortLevel))
 		if strings.HasPrefix(baseModel, "claude-opus-4-7") ||
-			strings.HasPrefix(baseModel, "claude-opus-4-8") {
+			strings.HasPrefix(baseModel, "claude-opus-4-8") ||
+			strings.HasPrefix(baseModel, "claude-opus-5-5") {
 			claudeRequest.Thinking.Display = "summarized"
 			claudeRequest.Temperature = nil
 			claudeRequest.TopP = nil
@@ -173,10 +175,16 @@ func OpenAIChatRequestToClaudeMessages(c context.Context, info convmeta.Meta, te
 		if resolvedModel == "" {
 			resolvedModel = claudeRequest.Model
 		}
-		validEffort := textRequest.ReasoningEffort == "low" || textRequest.ReasoningEffort == "medium" || textRequest.ReasoningEffort == "high"
+		validEffort := textRequest.ReasoningEffort == "low" || textRequest.ReasoningEffort == "medium" ||
+			textRequest.ReasoningEffort == "high" || textRequest.ReasoningEffort == "xhigh" ||
+			textRequest.ReasoningEffort == "max"
 		if strings.HasPrefix(resolvedModel, "claude-opus-5-5") && validEffort {
 			claudeRequest.Thinking = &dto.Thinking{Type: "adaptive", Display: "summarized"}
 			claudeRequest.OutputConfig = json.RawMessage(fmt.Sprintf(`{"effort":"%s"}`, textRequest.ReasoningEffort))
+			// Opus 5.5 adaptive thinking rejects non-default temperature/top_p/top_k with 400.
+			claudeRequest.Temperature = nil
+			claudeRequest.TopP = nil
+			claudeRequest.TopK = nil
 		} else {
 			switch textRequest.ReasoningEffort {
 			case "low":
