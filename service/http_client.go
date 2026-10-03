@@ -105,15 +105,18 @@ func newRelayHTTPTransport() *http.Transport {
 	// This only covers the wait for the headers; streaming after the headers arrive
 	// is not affected. Set RELAY_RESPONSE_HEADER_TIMEOUT=0 to restore the old
 	// unbounded behaviour.
-	if seconds := common.RelayResponseHeaderTimeout; seconds > 0 {
+	seconds := common.RelayResponseHeaderTimeout
+	if seconds > 0 {
 		// Clamp before converting: seconds beyond maxTimeoutSeconds overflow
 		// time.Duration and can wrap into a tiny positive timeout, which would cut
 		// every relay request instead of only the stuck ones.
 		if seconds > maxTimeoutSeconds {
 			seconds = maxTimeoutSeconds
 		}
-		transport.ResponseHeaderTimeout = time.Duration(seconds) * time.Second
+	} else {
+		seconds = 0
 	}
+	transport.ResponseHeaderTimeout = time.Duration(seconds) * time.Second
 	transport.ForceAttemptHTTP2 = true
 	if common.TLSInsecureSkipVerify {
 		transport.TLSClientConfig = common.InsecureTLSConfig.Clone()

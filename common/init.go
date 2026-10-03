@@ -6,6 +6,7 @@ import (
 	"log"
 	"math"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -67,7 +68,7 @@ func InitEnv() {
 	}
 	initUserSessionSettings()
 	if os.Getenv("SQLITE_PATH") != "" {
-		SQLitePath = os.Getenv("SQLITE_PATH")
+		SQLitePath = sqliteDSNWithDefaults(os.Getenv("SQLITE_PATH"))
 	}
 	if *LogDir != "" {
 		var err error
@@ -91,11 +92,7 @@ func InitEnv() {
 	TLSInsecureSkipVerify = GetEnvOrDefaultBool("TLS_INSECURE_SKIP_VERIFY", false)
 	if TLSInsecureSkipVerify {
 		if tr, ok := http.DefaultTransport.(*http.Transport); ok && tr != nil {
-			if tr.TLSClientConfig != nil {
-				tr.TLSClientConfig.InsecureSkipVerify = true
-			} else {
-				tr.TLSClientConfig = InsecureTLSConfig.Clone()
-			}
+			enableInsecureSkipVerify(tr)
 		}
 	}
 	SMTPStartTLSEnabled = GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLE", GetEnvOrDefaultBool("SMTP_STARTTLS_ENABLED", false))
@@ -135,6 +132,60 @@ func InitEnv() {
 	SearchRateLimitNum = GetEnvOrDefault("SEARCH_RATE_LIMIT", 10)
 	SearchRateLimitDuration = int64(GetEnvOrDefault("SEARCH_RATE_LIMIT_DURATION", 60))
 	initConstantEnv()
+}
+
+func enableInsecureSkipVerify(transport *http.Transport) {
+	if transport.TLSClientConfig == nil {
+		transport.TLSClientConfig = InsecureTLSConfig.Clone()
+		return
+	}
+	tlsConfig := transport.TLSClientConfig.Clone()
+	tlsConfig.InsecureSkipVerify = true
+	transport.TLSClientConfig = tlsConfig
+}
+
+func sqliteDSNWithDefaults(dsn string) string {
+	hasBusyTimeout := false
+	hasJournalMode := false
+	hasTxLock := false
+	if queryStart := strings.IndexByte(dsn, '?'); queryStart >= 0 {
+		for _, option := range strings.Split(dsn[queryStart+1:], "&") {
+			key, value, _ := strings.Cut(option, "=")
+			decodedKey, err := url.QueryUnescape(key)
+			if err == nil && strings.EqualFold(decodedKey, "_txlock") {
+				hasTxLock = true
+			}
+			if err != nil || !strings.EqualFold(decodedKey, "_pragma") {
+				continue
+			}
+			decodedValue, err := url.QueryUnescape(value)
+			if err != nil {
+				continue
+			}
+			pragma := strings.ToLower(strings.TrimSpace(decodedValue))
+			hasBusyTimeout = hasBusyTimeout || strings.HasPrefix(pragma, "busy_timeout(") || strings.HasPrefix(pragma, "busy_timeout=")
+			hasJournalMode = hasJournalMode || strings.HasPrefix(pragma, "journal_mode(") || strings.HasPrefix(pragma, "journal_mode=")
+		}
+	}
+
+	defaults := make([]string, 0, 3)
+	if !hasBusyTimeout {
+		defaults = append(defaults, "_pragma=busy_timeout(30000)")
+	}
+	if !hasJournalMode {
+		defaults = append(defaults, "_pragma=journal_mode(WAL)")
+	}
+	if !hasTxLock {
+		defaults = append(defaults, "_txlock=immediate")
+	}
+	if len(defaults) == 0 {
+		return dsn
+	}
+	separator := "?"
+	if strings.Contains(dsn, "?") {
+		separator = "&"
+	}
+	return dsn + separator + strings.Join(defaults, "&")
 }
 
 func initUserSessionSettings() {
