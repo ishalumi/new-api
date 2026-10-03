@@ -256,8 +256,9 @@ type OpenAIVideoResponse struct {
 }
 
 type InputTokenDetails struct {
-	CachedTokens         int `json:"cached_tokens"`
-	CachedCreationTokens int `json:"cached_creation_tokens,omitempty"`
+	CachedTokens         int                 `json:"cached_tokens"`
+	CachedTokensDetails  *CachedTokenDetails `json:"cached_tokens_details,omitempty"`
+	CachedCreationTokens int                 `json:"cached_creation_tokens,omitempty"`
 	// CacheWriteTokens is OpenAI's native cache-write count, reported as
 	// prompt_tokens_details.cache_write_tokens (Chat Completions) or
 	// input_tokens_details.cache_write_tokens (Responses). It is billed at the
@@ -266,6 +267,37 @@ type InputTokenDetails struct {
 	TextTokens       int `json:"text_tokens"`
 	AudioTokens      int `json:"audio_tokens"`
 	ImageTokens      int `json:"image_tokens"`
+}
+
+type CachedTokenDetails struct {
+	TextTokens  *int `json:"text_tokens,omitempty"`
+	ImageTokens *int `json:"image_tokens,omitempty"`
+	AudioTokens *int `json:"audio_tokens,omitempty"`
+}
+
+func (d *CachedTokenDetails) HasTokens() bool {
+	return d != nil && (d.TextTokens != nil && *d.TextTokens != 0 ||
+		d.ImageTokens != nil && *d.ImageTokens != 0 || d.AudioTokens != nil && *d.AudioTokens != 0)
+}
+
+func (d InputTokenDetails) Clone() InputTokenDetails {
+	if d.CachedTokensDetails != nil {
+		cachedTokensDetails := *d.CachedTokensDetails
+		if cachedTokensDetails.TextTokens != nil {
+			textTokens := *cachedTokensDetails.TextTokens
+			cachedTokensDetails.TextTokens = &textTokens
+		}
+		if cachedTokensDetails.ImageTokens != nil {
+			imageTokens := *cachedTokensDetails.ImageTokens
+			cachedTokensDetails.ImageTokens = &imageTokens
+		}
+		if cachedTokensDetails.AudioTokens != nil {
+			audioTokens := *cachedTokensDetails.AudioTokens
+			cachedTokensDetails.AudioTokens = &audioTokens
+		}
+		d.CachedTokensDetails = &cachedTokensDetails
+	}
+	return d
 }
 
 // CacheCreationTokensTotal returns the cache-write token count regardless of

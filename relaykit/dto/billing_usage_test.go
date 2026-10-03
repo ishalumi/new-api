@@ -49,6 +49,89 @@ func TestNewOpenAIChatBillingUsageRequiresTokenContent(t *testing.T) {
 	assert.Equal(t, 1, billingUsage.OpenAIUsage.PromptTokens)
 }
 
+func TestCachedTokenDetailsJSONRoundTripPreservesExplicitZero(t *testing.T) {
+	for _, field := range []string{"input_tokens_details", "prompt_tokens_details"} {
+		t.Run(field, func(t *testing.T) {
+			var usage Usage
+			data := []byte(`{"` + field + `":{"cached_tokens_details":{"text_tokens":0,"image_tokens":0,"audio_tokens":0}}}`)
+			require.NoError(t, kitutil.Unmarshal(data, &usage))
+
+			var details *CachedTokenDetails
+			if field == "input_tokens_details" {
+				require.NotNil(t, usage.InputTokensDetails)
+				details = usage.InputTokensDetails.CachedTokensDetails
+			} else {
+				details = usage.PromptTokensDetails.CachedTokensDetails
+			}
+			require.NotNil(t, details)
+			require.NotNil(t, details.TextTokens)
+			require.NotNil(t, details.ImageTokens)
+			require.NotNil(t, details.AudioTokens)
+			assert.Zero(t, *details.TextTokens)
+			assert.Zero(t, *details.ImageTokens)
+			assert.Zero(t, *details.AudioTokens)
+
+			encoded, err := kitutil.Marshal(usage)
+			require.NoError(t, err)
+			assert.Contains(t, string(encoded), `"cached_tokens_details":{"text_tokens":0,"image_tokens":0,"audio_tokens":0}`)
+		})
+	}
+}
+
+func TestOpenAIBillingUsageSnapshotsDetachCachedTokenDetails(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		new  func(*Usage) *BillingUsage
+	}{
+		{name: "responses", new: NewOpenAIResponsesBillingUsage},
+		{name: "chat", new: NewOpenAIChatBillingUsage},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			textTokens := 100
+			imageTokens := 200
+			usage := &Usage{
+				PromptTokens: 1,
+				PromptTokensDetails: InputTokenDetails{CachedTokensDetails: &CachedTokenDetails{
+					TextTokens: &textTokens,
+				}},
+				InputTokensDetails: &InputTokenDetails{CachedTokensDetails: &CachedTokenDetails{
+					ImageTokens: &imageTokens,
+				}},
+			}
+
+			billing := test.new(usage)
+			require.NotNil(t, billing)
+			*usage.PromptTokensDetails.CachedTokensDetails.TextTokens = 9
+			*usage.InputTokensDetails.CachedTokensDetails.ImageTokens = 8
+
+			assert.Equal(t, 100, *billing.OpenAIUsage.PromptTokensDetails.CachedTokensDetails.TextTokens)
+			assert.Equal(t, 200, *billing.OpenAIUsage.InputTokensDetails.CachedTokensDetails.ImageTokens)
+		})
+	}
+}
+
+func TestCloneBillingUsageDetachesCachedTokenDetails(t *testing.T) {
+	textTokens := 100
+	imageTokens := 200
+	original := NewOpenAIChatBillingUsage(&Usage{
+		PromptTokens: 1,
+		PromptTokensDetails: InputTokenDetails{CachedTokensDetails: &CachedTokenDetails{
+			TextTokens: &textTokens,
+		}},
+		InputTokensDetails: &InputTokenDetails{CachedTokensDetails: &CachedTokenDetails{
+			ImageTokens: &imageTokens,
+		}},
+	})
+	require.NotNil(t, original)
+
+	clone := CloneBillingUsage(original)
+	*original.OpenAIUsage.PromptTokensDetails.CachedTokensDetails.TextTokens = 9
+	*original.OpenAIUsage.InputTokensDetails.CachedTokensDetails.ImageTokens = 8
+
+	assert.Equal(t, 100, *clone.OpenAIUsage.PromptTokensDetails.CachedTokensDetails.TextTokens)
+	assert.Equal(t, 200, *clone.OpenAIUsage.InputTokensDetails.CachedTokensDetails.ImageTokens)
+}
+
 func TestNewEstimatedGeminiChatBillingUsage(t *testing.T) {
 	billingUsage := NewEstimatedGeminiChatBillingUsage(&Usage{
 		PromptTokens:     11,

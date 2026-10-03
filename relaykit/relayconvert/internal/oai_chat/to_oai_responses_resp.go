@@ -133,13 +133,14 @@ func UsageFromChatUsage(src *dto.Usage) *dto.Usage {
 	} else {
 		usage.TotalTokens = usage.InputTokens + usage.OutputTokens
 	}
-	if src.PromptTokensDetails.CachedTokens != 0 ||
+	if src.PromptTokensDetails.CachedTokensDetails != nil ||
+		src.PromptTokensDetails.CachedTokens != 0 ||
 		src.PromptTokensDetails.ImageTokens != 0 ||
 		src.PromptTokensDetails.AudioTokens != 0 ||
 		src.PromptTokensDetails.CachedCreationTokens != 0 ||
 		src.PromptTokensDetails.CacheWriteTokens != 0 ||
 		src.PromptTokensDetails.TextTokens != 0 {
-		details := src.PromptTokensDetails
+		details := src.PromptTokensDetails.Clone()
 		usage.InputTokensDetails = &details
 	}
 	if src.CompletionTokenDetails.ReasoningTokens != 0 ||

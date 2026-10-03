@@ -532,6 +532,7 @@ func TestConvertStreamResponseStatefulMultiHopResponsesToClaude(t *testing.T) {
 }
 
 func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
+	chatCachedImageTokens := 2
 	chat := textRegistryChatResponse()
 	chat.Usage = dto.Usage{
 		PromptTokens:     10,
@@ -544,6 +545,9 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 			TextTokens:           4,
 			AudioTokens:          1,
 			ImageTokens:          5,
+			CachedTokensDetails: &dto.CachedTokenDetails{
+				ImageTokens: &chatCachedImageTokens,
+			},
 		},
 		CompletionTokenDetails: dto.OutputTokenDetails{
 			ReasoningTokens: 2,
@@ -564,11 +568,16 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 	assert.Equal(t, 4, result.Usage.InputTokensDetails.TextTokens)
 	assert.Equal(t, 1, result.Usage.InputTokensDetails.AudioTokens)
 	assert.Equal(t, 5, result.Usage.InputTokensDetails.ImageTokens)
+	require.NotNil(t, result.Usage.InputTokensDetails.CachedTokensDetails)
+	assert.Equal(t, 2, *result.Usage.InputTokensDetails.CachedTokensDetails.ImageTokens)
+	*chat.Usage.PromptTokensDetails.CachedTokensDetails.ImageTokens = 9
+	assert.Equal(t, 2, *result.Usage.InputTokensDetails.CachedTokensDetails.ImageTokens)
 	assert.Equal(t, 2, result.Usage.CompletionTokenDetails.ReasoningTokens)
 	assert.Equal(t, 2, result.Usage.CompletionTokenDetails.TextTokens)
 	assert.Equal(t, 1, result.Usage.CompletionTokenDetails.AudioTokens)
 	assert.Equal(t, 2, result.Usage.CompletionTokenDetails.ImageTokens)
 
+	responsesCachedTextTokens := 3
 	responses := &dto.OpenAIResponsesResponse{
 		ID:        "resp_1",
 		Status:    []byte(`"completed"`),
@@ -586,6 +595,9 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 				TextTokens:           5,
 				AudioTokens:          2,
 				ImageTokens:          1,
+				CachedTokensDetails: &dto.CachedTokenDetails{
+					TextTokens: &responsesCachedTextTokens,
+				},
 			},
 			CompletionTokenDetails: dto.OutputTokenDetails{
 				ReasoningTokens: 3,
@@ -606,6 +618,10 @@ func TestResponseUsageMatrixChatAndResponsesDetails(t *testing.T) {
 	assert.Equal(t, 5, result.Usage.PromptTokensDetails.TextTokens)
 	assert.Equal(t, 2, result.Usage.PromptTokensDetails.AudioTokens)
 	assert.Equal(t, 1, result.Usage.PromptTokensDetails.ImageTokens)
+	require.NotNil(t, result.Usage.PromptTokensDetails.CachedTokensDetails)
+	assert.Equal(t, 3, *result.Usage.PromptTokensDetails.CachedTokensDetails.TextTokens)
+	*responses.Usage.InputTokensDetails.CachedTokensDetails.TextTokens = 9
+	assert.Equal(t, 3, *result.Usage.PromptTokensDetails.CachedTokensDetails.TextTokens)
 	assert.Equal(t, 3, result.Usage.CompletionTokenDetails.ReasoningTokens)
 	assert.Equal(t, 4, result.Usage.CompletionTokenDetails.TextTokens)
 	assert.Equal(t, 1, result.Usage.CompletionTokenDetails.AudioTokens)
